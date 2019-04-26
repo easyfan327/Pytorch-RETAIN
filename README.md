@@ -1,6 +1,8 @@
 #### Introduction
 A pytorch implementation of RETAIN, which is an interpretable predictive model for healthcare applications.
 
+Please refer to the origin work for information on dataset and data preprocessing
+
 #### Relevant Publications
 
 RETAIN implements an algorithm introduced in the following [paper](http://papers.nips.cc/paper/6321-retain-an-interpretable-predictive-model-for-healthcare-using-reverse-time-attention-mechanism):
