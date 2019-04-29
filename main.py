@@ -101,7 +101,7 @@ class RetainNN(nn.Module):
         return output, var_rnn_hidden, visit_rnn_hidden
 
     def init_hidden(self, current_batch_size):
-        return torch.zeros(current_batch_size, self.var_hidden_size).unsqueeze(0), torch.zeros(current_batch_size, self.visit_hidden_size).unsqueeze(0)
+        return torch.zeros(current_batch_size, self.var_hidden_size).unsqueeze(0).to(device), torch.zeros(current_batch_size, self.visit_hidden_size).unsqueeze(0).to(device)
 
 
 def init_params(params: dict):
@@ -197,19 +197,24 @@ def init_data(params: dict):
 
 
 if __name__ == "__main__":
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    #print(device)
 
     parameters = dict()
     init_params(parameters)
 
     train_set_x, train_set_y, valid_set_x, valid_set_y, test_set_x, test_set_y = init_data(parameters)
 
-    model = RetainNN(params=parameters)
-    for name, parm in model.named_parameters():
-        print(name, parm)
+    model = RetainNN(params=parameters).to(device)
+    # for name, parm in model.named_parameters():
+    #   print(name, parm)
     optimizer = torch.optim.Adadelta(model.parameters(), lr=1.0, rho=0.9, eps=1e-6, weight_decay=0.001)
     loss_fn = torch.nn.CrossEntropyLoss()
 
     n_batches = int(np.ceil(float(len(train_set_y)) / float(parameters["batch_size"])))
+    best_valid_auc = 0
+    best_test_auc = 0
+    best_epoch = 0
     for epoch in range(parameters["n_epoches"]):
         model.train()
         loss_vector = torch.zeros(n_batches, dtype=torch.float)
@@ -217,8 +222,8 @@ if __name__ == "__main__":
             xb = train_set_x[index*parameters["batch_size"]:(index+1)*parameters["batch_size"]]
             yb = train_set_y[index*parameters["batch_size"]:(index+1)*parameters["batch_size"]]
             xbpad, xbpad_lengths = padMatrixWithoutTime(seqs=xb, options=parameters)
-            xbpadtensor = torch.from_numpy(xbpad).float()
-            ybtensor = torch.from_numpy(np.array(yb)).long()
+            xbpadtensor = torch.from_numpy(xbpad).float().to(device)
+            ybtensor = torch.from_numpy(np.array(yb)).long().to(device)
             #print(xbpadtensor.shape)
             var_rnn_hidden_init, visit_rnn_hidden_init = model.init_hidden(xbpadtensor.shape[1])
 
@@ -238,27 +243,42 @@ if __name__ == "__main__":
 
         model.eval()
         x, x_length = padMatrixWithoutTime(seqs=valid_set_x, options=parameters)
-        x = torch.from_numpy(x).float()
-        y_true = torch.from_numpy(np.array(valid_set_y)).long()
+        x = torch.from_numpy(x).float().to(device)
+        y_true = torch.from_numpy(np.array(valid_set_y)).long().to(device)
         var_rnn_hidden_init, visit_rnn_hidden_init = model.init_hidden(x.shape[1])
         y_hat, var_rnn_hidden_init, visit_rnn_hidden_init = model(x, var_rnn_hidden_init, visit_rnn_hidden_init)
         y_true = y_true.unsqueeze(1)
-        y_true_oh = torch.zeros(y_hat.shape).scatter_(1, y_true, 1)
-        auc = roc_auc_score(y_true=y_true_oh.detach().numpy(), y_score=y_hat.detach().numpy())
+        y_true_oh = torch.zeros(y_hat.shape).to(device).scatter_(1, y_true, 1)
+        auc = roc_auc_score(y_true=y_true_oh.detach().cpu().numpy(), y_score=y_hat.detach().cpu().numpy())
+            
+        x, x_length = padMatrixWithoutTime(seqs=test_set_x, options=parameters)
+        x = torch.from_numpy(x).float().to(device)
+        y_true = torch.from_numpy(np.array(test_set_y)).long().to(device)
+        var_rnn_hidden_init, visit_rnn_hidden_init = model.init_hidden(x.shape[1])
+        y_hat, var_rnn_hidden_init, visit_rnn_hidden_init = model(x, var_rnn_hidden_init, visit_rnn_hidden_init)
+        y_true = y_true.unsqueeze(1)
+        y_true_oh = torch.zeros(y_hat.shape).to(device).scatter_(1, y_true, 1)
+        test_auc = roc_auc_score(y_true=y_true_oh.detach().cpu().numpy(), y_score=y_hat.detach().cpu().numpy())
 
-        print("epoch:{} train-loss:{} valid-auc:{}".format(epoch, torch.mean(loss_vector), auc))
+        if test_auc > best_test_auc:
+            best_test_auc = test_auc
+            best_epoch = epoch
 
+        print("{},{},{},{}".format(epoch, torch.mean(loss_vector), auc, test_auc))
+
+    # print("best auc = {} at epoch {}".format(best_test_auc, best_epoch))
+    """
     model.eval()
     x, x_length = padMatrixWithoutTime(seqs=test_set_x, options=parameters)
-    x = torch.from_numpy(x).float()
-    y_true = torch.from_numpy(np.array(test_set_y)).long()
+    x = torch.from_numpy(x).float().to(device)
+    y_true = torch.from_numpy(np.array(test_set_y)).long().to(device)
     var_rnn_hidden_init, visit_rnn_hidden_init = model.init_hidden(x.shape[1])
     y_hat, var_rnn_hidden_init, visit_rnn_hidden_init = model(x, var_rnn_hidden_init, visit_rnn_hidden_init)
     y_true = y_true.unsqueeze(1)
-    y_true_oh = torch.zeros(y_hat.shape).scatter_(1, y_true, 1)
-    auc = roc_auc_score(y_true=y_true_oh.detach().numpy(), y_score=y_hat.detach().numpy())
+    y_true_oh = torch.zeros(y_hat.shape).to(device).scatter_(1, y_true, 1)
+    auc = roc_auc_score(y_true=y_true_oh.detach().cpu().numpy(), y_score=y_hat.detach().cpu().numpy())
 
     print("test auc:{}".format(auc))
-
+    """
 
         
